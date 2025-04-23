@@ -1,56 +1,38 @@
-# modules/glue/main.tf (Versão Avançada)
-
+# modules/glue/main.tf
 # Databases do Glue Data Catalog para cada camada
 resource "aws_glue_catalog_database" "bronze_db" {
-  name        = var.database_names.bronze
-  description = "Database para armazenar metadados da camada Bronze do Data Lake"
-  
-  parameters = {
-    layer      = "bronze"
-    project    = var.project
-    environment = var.environment
-    created_by = "terraform"
-  }
+  name = var.database_names.bronze
 }
 
 resource "aws_glue_catalog_database" "silver_db" {
-  name        = var.database_names.silver
-  description = "Database para armazenar metadados da camada Silver do Data Lake"
-  
-  parameters = {
-    layer      = "silver"
-    project    = var.project
-    environment = var.environment
-    created_by = "terraform"
-  }
+  name = var.database_names.silver
 }
 
 resource "aws_glue_catalog_database" "gold_db" {
-  name        = var.database_names.gold
-  description = "Database para armazenar metadados da camada Gold do Data Lake"
-  
-  parameters = {
-    layer      = "gold"
-    project    = var.project
-    environment = var.environment
-    created_by = "terraform"
-  }
+  name = var.database_names.gold
 }
 
-# Crawler para a camada Bronze
-resource "aws_glue_crawler" "bronze_crawler" {
-  name          = var.crawler_names.bronze
+# Múltiplos crawlers conforme configuração
+resource "aws_glue_crawler" "crawlers" {
+  for_each      = var.crawlers
+  
+  name          = each.value.name
+  description   = each.value.description
   role          = var.glue_role_arn
-  database_name = aws_glue_catalog_database.bronze_db.name
-  description   = "Crawler para a camada Bronze do Data Lake"
+  database_name = each.value.database_name
+  schedule      = each.value.schedule
   
   lake_formation_configuration {
     use_lake_formation_credentials = true
   }
 
-  s3_target {
-    path = "s3://${var.buckets.bronze}"
-    exclusions = []
+  # Múltiplos alvos S3 para o mesmo crawler
+  dynamic "s3_target" {
+    for_each = each.value.s3_targets
+    content {
+      path       = s3_target.value
+      exclusions = each.value.exclusions
+    }
   }
 
   schema_change_policy {
@@ -58,6 +40,7 @@ resource "aws_glue_crawler" "bronze_crawler" {
     update_behavior = var.crawler_schema_change_policy.update_behavior
   }
 
+  # Configurações avançadas
   configuration = jsonencode({
     Version = 1.0
     CrawlerOutput = {
@@ -69,146 +52,42 @@ resource "aws_glue_crawler" "bronze_crawler" {
     }
   })
 
+  # Habilitar lineage para rastreamento
   lineage_configuration {
     crawler_lineage_settings = "ENABLE"
   }
 
-  recrawl_policy {
-    recrawl_behavior = "CRAWL_EVERYTHING"
-  }
-  
-  schedule = var.crawler_schedule
-
-  tags = {
-    Name        = var.crawler_names.bronze
-    Environment = var.environment
-    Project     = var.project
-    Layer       = "bronze"
-  }
-}
-
-# Crawler para a camada Silver
-resource "aws_glue_crawler" "silver_crawler" {
-  name          = var.crawler_names.silver
-  role          = var.glue_role_arn
-  database_name = aws_glue_catalog_database.silver_db.name
-  description   = "Crawler para a camada Silver do Data Lake"
-  
-  lake_formation_configuration {
-    use_lake_formation_credentials = true
-  }
-
-  s3_target {
-    path = "s3://${var.buckets.silver}"
-    exclusions = []
-  }
-
-  schema_change_policy {
-    delete_behavior = var.crawler_schema_change_policy.delete_behavior
-    update_behavior = var.crawler_schema_change_policy.update_behavior
-  }
-
-  configuration = jsonencode({
-    Version = 1.0
-    CrawlerOutput = {
-      Partitions = { AddOrUpdateBehavior = "InheritFromTable" }
-      Tables = { TableThreshold = 0 }
-    }
-    Grouping = {
-      TableGroupingPolicy = "CombineCompatibleSchemas"
-    }
-  })
-
-  lineage_configuration {
-    crawler_lineage_settings = "ENABLE"
-  }
-
+  # Configuração para sempre verificar todos os arquivos
   recrawl_policy {
     recrawl_behavior = "CRAWL_EVERYTHING"
   }
 
+  # Configuração de prefixo de tabela, se fornecido
+  table_prefix = each.value.table_prefix != null ? each.value.table_prefix : ""
+
   tags = {
-    Name        = var.crawler_names.silver
+    Name        = each.value.name
     Environment = var.environment
     Project     = var.project
-    Layer       = "silver"
   }
 }
 
-# Crawler para a camada Gold
-resource "aws_glue_crawler" "gold_crawler" {
-  name          = var.crawler_names.gold
-  role          = var.glue_role_arn
-  database_name = aws_glue_catalog_database.gold_db.name
-  description   = "Crawler para a camada Gold do Data Lake"
+# Upload dos scripts para o bucket S3
+resource "aws_s3_object" "job_scripts" {
+  for_each = var.jobs
   
-  lake_formation_configuration {
-    use_lake_formation_credentials = true
-  }
-
-  s3_target {
-    path = "s3://${var.buckets.gold}"
-    exclusions = []
-  }
-
-  schema_change_policy {
-    delete_behavior = var.crawler_schema_change_policy.delete_behavior
-    update_behavior = var.crawler_schema_change_policy.update_behavior
-  }
-
-  configuration = jsonencode({
-    Version = 1.0
-    CrawlerOutput = {
-      Partitions = { AddOrUpdateBehavior = "InheritFromTable" }
-      Tables = { TableThreshold = 0 }
-    }
-    Grouping = {
-      TableGroupingPolicy = "CombineCompatibleSchemas"
-    }
-  })
-
-  lineage_configuration {
-    crawler_lineage_settings = "ENABLE"
-  }
-
-  recrawl_policy {
-    recrawl_behavior = "CRAWL_EVERYTHING"
-  }
-
-  tags = {
-    Name        = var.crawler_names.gold
-    Environment = var.environment
-    Project     = var.project
-    Layer       = "gold"
-  }
-}
-
-# Uploads de scripts para o bucket S3
-resource "aws_s3_object" "bronze_to_silver_script" {
   bucket = var.buckets.scripts
-  key    = var.scripts.bronze_to_silver.target_key
-  source = var.scripts.bronze_to_silver.source_path
-  etag   = filemd5(var.scripts.bronze_to_silver.source_path)
+  # Destino no S3 mantendo a estrutura de pastas
+  key    = "scripts/${each.value.script_path}"
+  # Origem do arquivo local
+  source = "${var.scripts_base_path}/${each.value.script_path}"
+  # Garantir atualização se o script mudar
+  etag   = filemd5("${var.scripts_base_path}/${each.value.script_path}")
 
   tags = {
     Environment = var.environment
     Project     = var.project
-    Layer       = "scripts"
-    Job         = "bronze_to_silver"
-  }
-}
-
-resource "aws_s3_object" "silver_to_gold_script" {
-  bucket = var.buckets.scripts
-  key    = var.scripts.silver_to_gold.target_key
-  source = var.scripts.silver_to_gold.source_path
-  etag   = filemd5(var.scripts.silver_to_gold.source_path)
-
-  tags = {
-    Environment = var.environment
-    Project     = var.project
-    Layer       = "scripts"
-    Job         = "silver_to_gold"
+    Job         = each.key
   }
 }
 
@@ -226,214 +105,70 @@ locals {
   }
 }
 
-# Job para transformar dados de Bronze para Silver
-resource "aws_glue_job" "bronze_to_silver" {
-  name              = var.job_names.bronze_to_silver
+# Múltiplos jobs Glue conforme configuração
+resource "aws_glue_job" "jobs" {
+  for_each          = var.jobs
+  
+  name              = each.value.name
+  description       = each.value.description
   role_arn          = var.glue_role_arn
-  description       = "Job para transformar dados da camada Bronze para Silver"
   glue_version      = var.glue_version
-  worker_type       = var.worker_type
-  number_of_workers = var.number_of_workers
-  timeout           = 60  # 60 minutos
+  worker_type       = each.value.worker_type
+  number_of_workers = each.value.number_of_workers
+  timeout           = each.value.timeout
+  max_retries       = each.value.max_retries
   
   command {
-    script_location = "s3://${var.buckets.scripts}/${var.scripts.bronze_to_silver.target_key}"
+    script_location = "s3://${var.buckets.scripts}/scripts/${each.value.script_path}"
     python_version  = var.python_version
     name            = "glueetl"
   }
 
   execution_property {
-    max_concurrent_runs = var.max_concurrent_runs
+    max_concurrent_runs = 1
   }
   
+  # Argumentos específicos do job + argumentos comuns
   default_arguments = merge(
     local.common_job_arguments,
     {
-      "--SOURCE_DATABASE"        = aws_glue_catalog_database.bronze_db.name
-      "--TARGET_DATABASE"        = aws_glue_catalog_database.silver_db.name
-      "--SOURCE_S3_BUCKET"       = var.buckets.bronze
-      "--TARGET_S3_BUCKET"       = var.buckets.silver
+      "--SOURCE_DATABASE"        = each.value.source_db
+      "--TARGET_DATABASE"        = each.value.target_db
+      "--SOURCE_PATH"            = each.value.source_path
+      "--TARGET_PATH"            = each.value.target_path
       "--ENVIRONMENT"            = var.environment
-      "--TABLE_PREFIX"           = var.table_prefix
     },
-    var.additional_job_arguments
+    each.value.additional_args
   )
-  
-  security_configuration = "" # Opcional: Configuração de segurança do Glue
   
   notification_property {
     notify_delay_after = 30  # Notificar após 30 minutos de atraso
   }
 
   tags = {
-    Name        = var.job_names.bronze_to_silver
+    Name        = each.value.name
     Environment = var.environment
     Project     = var.project
-    Layer       = "processing"
-    Source      = "bronze"
-    Target      = "silver"
+    SourceDB    = each.value.source_db
+    TargetDB    = each.value.target_db
   }
 }
 
-# Job para transformar dados de Silver para Gold
-resource "aws_glue_job" "silver_to_gold" {
-  name              = var.job_names.silver_to_gold
-  role_arn          = var.glue_role_arn
-  description       = "Job para transformar dados da camada Silver para Gold"
-  glue_version      = var.glue_version
-  worker_type       = var.worker_type
-  number_of_workers = var.number_of_workers
-  timeout           = 60  # 60 minutos
+# Criação de triggers para os jobs (opcional baseado no schedule)
+resource "aws_glue_trigger" "job_schedules" {
+  for_each    = { for k, v in var.jobs : k => v if v.schedule != "" }
   
-  command {
-    script_location = "s3://${var.buckets.scripts}/${var.scripts.silver_to_gold.target_key}"
-    python_version  = var.python_version
-    name            = "glueetl"
-  }
-
-  execution_property {
-    max_concurrent_runs = var.max_concurrent_runs
-  }
-
-  default_arguments = merge(
-    local.common_job_arguments,
-    {
-      "--SOURCE_DATABASE"        = aws_glue_catalog_database.silver_db.name
-      "--TARGET_DATABASE"        = aws_glue_catalog_database.gold_db.name
-      "--SOURCE_S3_BUCKET"       = var.buckets.silver
-      "--TARGET_S3_BUCKET"       = var.buckets.gold
-      "--ENVIRONMENT"            = var.environment
-      "--TABLE_PREFIX"           = var.table_prefix
-    },
-    var.additional_job_arguments
-  )
+  name        = "${each.value.name}_schedule"
+  type        = "SCHEDULED"
+  schedule    = each.value.schedule
+  description = "Agendamento para o job ${each.value.name}"
   
-  security_configuration = "" # Opcional: Configuração de segurança do Glue
-  
-  notification_property {
-    notify_delay_after = 30  # Notificar após 30 minutos de atraso
-  }
-
-  tags = {
-    Name        = var.job_names.silver_to_gold
-    Environment = var.environment
-    Project     = var.project
-    Layer       = "processing"
-    Source      = "silver"
-    Target      = "gold"
-  }
-}
-
-# Trigger para executar o crawler Bronze após ingestão de dados
-resource "aws_glue_trigger" "trigger_bronze_crawler" {
-  name          = "${var.crawler_names.bronze}_trigger"
-  type          = "SCHEDULED"
-  schedule      = var.crawler_schedule
-  enabled       = true
-  description   = "Trigger agendado para executar o crawler da camada Bronze"
-
   actions {
-    crawler_name = aws_glue_crawler.bronze_crawler.name
+    job_name = aws_glue_job.jobs[each.key].name
   }
-
-  tags = {
-    Name        = "${var.crawler_names.bronze}_trigger"
-    Environment = var.environment
-    Project     = var.project
-  }
-}
-
-# Trigger para executar o job Bronze to Silver após o crawler Bronze
-resource "aws_glue_trigger" "trigger_bronze_to_silver_job" {
-  name          = "${var.job_names.bronze_to_silver}_trigger"
-  type          = "CONDITIONAL"
-  description   = "Trigger condicional para executar o job Bronze to Silver após o crawler Bronze"
   
-  predicate {
-    conditions {
-      crawler_name = aws_glue_crawler.bronze_crawler.name
-      crawl_state  = "SUCCEEDED"
-    }
-  }
-
-  actions {
-    job_name = aws_glue_job.bronze_to_silver.name
-  }
-
   tags = {
-    Name        = "${var.job_names.bronze_to_silver}_trigger"
-    Environment = var.environment
-    Project     = var.project
-  }
-}
-
-# Trigger para executar o crawler Silver após o job Bronze to Silver
-resource "aws_glue_trigger" "trigger_silver_crawler" {
-  name          = "${var.crawler_names.silver}_trigger"
-  type          = "CONDITIONAL"
-  description   = "Trigger condicional para executar o crawler Silver após o job Bronze to Silver"
-  
-  predicate {
-    conditions {
-      job_name = aws_glue_job.bronze_to_silver.name
-      state    = "SUCCEEDED"
-    }
-  }
-
-  actions {
-    crawler_name = aws_glue_crawler.silver_crawler.name
-  }
-
-  tags = {
-    Name        = "${var.crawler_names.silver}_trigger"
-    Environment = var.environment
-    Project     = var.project
-  }
-}
-
-# Trigger para executar o job Silver to Gold após o crawler Silver
-resource "aws_glue_trigger" "trigger_silver_to_gold_job" {
-  name          = "${var.job_names.silver_to_gold}_trigger"
-  type          = "CONDITIONAL"
-  description   = "Trigger condicional para executar o job Silver to Gold após o crawler Silver"
-  
-  predicate {
-    conditions {
-      crawler_name = aws_glue_crawler.silver_crawler.name
-      crawl_state  = "SUCCEEDED"
-    }
-  }
-
-  actions {
-    job_name = aws_glue_job.silver_to_gold.name
-  }
-
-  tags = {
-    Name        = "${var.job_names.silver_to_gold}_trigger"
-    Environment = var.environment
-    Project     = var.project
-  }
-}
-
-# Trigger para executar o crawler Gold após o job Silver to Gold
-resource "aws_glue_trigger" "trigger_gold_crawler" {
-  name          = "${var.crawler_names.gold}_trigger"
-  type          = "CONDITIONAL"
-  description   = "Trigger condicional para executar o crawler Gold após o job Silver to Gold"
-  
-  predicate {
-    conditions {
-      job_name = aws_glue_job.silver_to_gold.name
-      state    = "SUCCEEDED"
-    }
-  }
-
-  actions {
-    crawler_name = aws_glue_crawler.gold_crawler.name
-  }
-
-  tags = {
-    Name        = "${var.crawler_names.gold}_trigger"
+    Name        = "${each.value.name}_schedule"
     Environment = var.environment
     Project     = var.project
   }

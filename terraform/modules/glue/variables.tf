@@ -24,23 +24,65 @@ variable "database_names" {
   }
 }
 
-variable "crawler_names" {
-  description = "Nomes dos crawlers Glue"
-  type        = map(string)
-  default     = {
-    bronze = "bronze_crawler"
-    silver = "silver_crawler"
-    gold   = "gold_crawler"
-  }
+# Definição para permitir múltiplos crawlers
+variable "crawlers" {
+  description = "Configuração para múltiplos crawlers"
+  type = map(object({
+    name          = string
+    database_name = string
+    s3_targets    = list(string)
+    description   = string
+    schedule      = optional(string)
+    table_prefix  = optional(string)
+    exclusions    = optional(list(string), [])
+  }))
+  # Exemplo:
+  # crawlers = {
+  #   "customer_data" = {
+  #     name          = "customer_data_crawler"
+  #     database_name = "bronze_db"
+  #     s3_targets    = ["s3://bucket-bronze/customers/", "s3://bucket-bronze/orders/"]
+  #     description   = "Crawler para dados de clientes"
+  #     schedule      = "cron(0 12 * * ? *)"
+  #   }
+  # }
 }
 
-variable "job_names" {
-  description = "Nomes dos jobs Glue"
-  type        = map(string)
-  default     = {
-    bronze_to_silver = "bronze_to_silver_job"
-    silver_to_gold   = "silver_to_gold_job"
-  }
+# Definição para permitir múltiplos jobs
+variable "jobs" {
+  description = "Configuração para múltiplos jobs"
+  type = map(object({
+    name              = string
+    script_path       = string
+    source_db         = string
+    target_db         = string
+    source_path       = string
+    target_path       = string
+    worker_type       = optional(string, "G.1X")
+    number_of_workers = optional(number, 2)
+    max_retries       = optional(number, 0)
+    timeout           = optional(number, 60)
+    description       = optional(string, "")
+    schedule          = optional(string, "")
+    additional_args   = optional(map(string), {})
+  }))
+  # Exemplo:
+  # jobs = {
+  #   "customer_bronze_to_silver" = {
+  #     name          = "customer_bronze_to_silver_job"
+  #     script_path   = "bronze_to_silver/customer_transform.py"
+  #     source_db     = "bronze_db"
+  #     target_db     = "silver_db"
+  #     source_path   = "s3://bucket-bronze/customers/"
+  #     target_path   = "s3://bucket-silver/customers/"
+  #   }
+  # }
+}
+
+variable "scripts_base_path" {
+  description = "Caminho base local para os scripts"
+  type        = string
+  default     = "files/scripts"
 }
 
 variable "buckets" {
@@ -48,42 +90,10 @@ variable "buckets" {
   type        = map(string)
 }
 
-variable "scripts" {
-  description = "Detalhes dos scripts Glue"
-  type        = map(object({
-    source_path = string
-    target_key  = string
-  }))
-}
-
 variable "glue_version" {
   description = "Versão do Glue a ser utilizada"
   type        = string
   default     = "3.0"
-}
-
-variable "worker_type" {
-  description = "Tipo de worker para jobs Glue"
-  type        = string
-  default     = "G.1X"
-}
-
-variable "number_of_workers" {
-  description = "Número de workers para jobs Glue"
-  type        = number
-  default     = 2
-}
-
-variable "max_concurrent_runs" {
-  description = "Número máximo de execuções concorrentes de jobs"
-  type        = number
-  default     = 1
-}
-
-variable "crawler_schedule" {
-  description = "Expressão cron para agendamento dos crawlers"
-  type        = string
-  default     = "cron(0 */4 * * ? *)" # A cada 4 horas
 }
 
 variable "python_version" {
@@ -104,12 +114,6 @@ variable "crawler_schema_change_policy" {
   }
 }
 
-variable "table_prefix" {
-  description = "Prefixo para as tabelas do Glue"
-  type        = string
-  default     = ""
-}
-
 variable "enable_bookmark" {
   description = "Habilitar bookmark para jobs Glue"
   type        = bool
@@ -126,10 +130,4 @@ variable "enable_spark_ui" {
   description = "Habilitar Spark UI para jobs Glue"
   type        = bool
   default     = true
-}
-
-variable "additional_job_arguments" {
-  description = "Argumentos adicionais para jobs Glue"
-  type        = map(string)
-  default     = {}
 }

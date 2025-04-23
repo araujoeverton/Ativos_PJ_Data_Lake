@@ -11,7 +11,7 @@ variable "aws_region" {
 variable "project" {
   description = "Nome do projeto"
   type        = string
-  default     = "datalake"
+  default     = "ativos_pj_datalake"
 }
 
 variable "environment" {

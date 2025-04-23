@@ -1,6 +1,4 @@
-###############################################################
-# variables.tf (Arquivo de Variáveis Principal)
-###############################################################
+# variables.tf (Arquivo de Variáveis Principal Atualizado)
 
 variable "aws_region" {
   description = "Região AWS onde os recursos serão criados"
@@ -11,7 +9,7 @@ variable "aws_region" {
 variable "project" {
   description = "Nome do projeto"
   type        = string
-  default     = "ativos_pj_datalake"
+  default     = "datalake"
 }
 
 variable "environment" {

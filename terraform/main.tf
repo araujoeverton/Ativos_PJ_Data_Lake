@@ -166,7 +166,7 @@ module "glue" {
   jobs     = local.all_jobs
   
   # Caminho base para os scripts
-  scripts_base_path = "files/scripts"
+  scripts_base_path = "scripts"
   
   buckets = {
     bronze  = module.s3.bronze_bucket_name
